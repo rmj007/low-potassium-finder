@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@media print {
+  header, nav, button, form { display: none !important; }
+  .bg-gray-50 { background: white !important; }
+  body { font-size: 11pt; }
+}
