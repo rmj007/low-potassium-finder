@@ -14,13 +14,14 @@ import ErrorBanner from './components/ErrorBanner';
 export default function App() {
   const [results, setResults]       = useState<SearchResults | null>(null);
   const [error, setError]           = useState<string | null>(null);
+  const [ocrWarning, setOcrWarning] = useState<string | null>(null);
   const [isLoading, setIsLoading]   = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [ocrProgress, setOcrProgress] = useState<number | undefined>();
   const [ocrStatus, setOcrStatus]     = useState<string | undefined>();
   const [servingGrams, setServingGrams] = useState(100);
 
-  function reset() { setError(null); setResults(null); }
+  function reset() { setError(null); setResults(null); setOcrWarning(null); }
 
   async function handleSearch(query: string) {
     reset();
@@ -65,13 +66,22 @@ export default function App() {
       const label = parseLabelText(text);
       const food  = labelToFoodItem(label, query || file.name.replace(/\.[^.]+$/, ''));
 
-      if (!food || food.potassium === 0) {
-        throw new Error('Could not read potassium from the label. Please ensure the label is clear and well-lit, then try again.');
+      // Total failure: nothing readable at all
+      if (!food || food.calories === 0) {
+        throw new Error('Could not read nutrition data from this image. Please ensure the label is well-lit, in focus, and the Nutrition Facts panel fills most of the frame.');
+      }
+
+      // Partial failure: other nutrients found but potassium missing
+      if (food.potassium === 0) {
+        setOcrWarning('Potassium could not be read from this label — the value may be unclear or absent. Alternatives are based on the food name you entered rather than the scanned potassium value.');
       }
 
       setLoadingMsg('Finding lower-potassium alternatives…');
       const bio  = calculateBioavailability(food);
-      const alts = await findAlternatives(food, 5);
+      // If potassium is 0 and a query name was given, search alternatives by name
+      const alts = food.potassium > 0
+        ? await findAlternatives(food, 5)
+        : query ? await findAlternatives({ ...food, potassium: 999 }, 5) : [];
 
       setServingGrams(food.servingSize || 100);
       setResults({ target: { food, bioavailability: bio }, alternatives: alts });
@@ -101,6 +111,12 @@ export default function App() {
         />
 
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+        {ocrWarning && !isLoading && (
+          <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 text-sm">
+            <span className="flex-1">{ocrWarning}</span>
+            <button onClick={() => setOcrWarning(null)} className="text-amber-500 hover:text-amber-700 font-bold text-lg leading-none">&times;</button>
+          </div>
+        )}
         {isLoading && <LoadingSpinner message={loadingMsg} />}
 
         {results && !isLoading && (

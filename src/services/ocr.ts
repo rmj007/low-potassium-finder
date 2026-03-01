@@ -44,29 +44,41 @@ export function parseLabelText(text: string): LabelData {
 
   const num = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ''));
 
-  for (const line of lines) {
-    const lc = line.toLowerCase();
+  // Search against individual lines first, then the full joined text as fallback.
+  // This handles Tesseract splitting a row across lines or omitting spaces on
+  // two-column labels (e.g. "Potassium90mg" with no gap).
+  const fullText = lines.join(' ');
+  const targets = [...lines, fullText];
 
-    // Serving size: "Serving Size 1 cup (240g)" or "Serving size: 170 g"
-    if (!result.servingSize && lc.includes('serving size')) {
-      const m = line.match(/(\d+(?:\.\d+)?)\s*(g|ml|oz|cup|tbsp|tsp)/i);
+  // Serving size — check each line
+  for (const line of lines) {
+    if (!result.servingSize && /serving size/i.test(line)) {
+      // Prefer weight in parentheses: "16 pieces (31g)"
+      const mParen = line.match(/\((\d+(?:\.\d+)?)\s*(g|ml)\)/i);
+      const mPlain = line.match(/(\d+(?:\.\d+)?)\s*(g|ml|oz|cup|tbsp|tsp)/i);
+      const m = mParen ?? mPlain;
       if (m) { result.servingSize = parseFloat(m[1]); result.servingUnit = m[2].toLowerCase(); }
     }
+  }
 
-    const patterns: [RegExp, keyof LabelData][] = [
-      [/calories?\s+(\d+)/i, 'calories'],
-      [/total\s+fat\s+([\d.]+)\s*g/i, 'fat'],
-      [/total\s+carb\w*\s+([\d.]+)\s*g/i, 'carbs'],
-      [/protein\s+([\d.]+)\s*g/i, 'protein'],
-      [/potassium\s+([\d.]+)\s*(mg)?/i, 'potassium'],
-    ];
-    for (const [re, field] of patterns) {
-      if (result[field] === undefined) {
-        const m = line.match(re);
-        if (m) result[field] = num(m[1]) as never;
-      }
+  // Nutrient patterns — [:\s]* between name and value handles:
+  //   "Potassium 90mg", "Potassium90mg", "Potassium: 90 mg", "Potassium  90"
+  const patterns: [RegExp, keyof LabelData][] = [
+    [/calories?[:\s]*(\d+)/i,                       'calories'],
+    [/total\s+fat[:\s]*([\d.]+)\s*g/i,              'fat'],
+    [/total\s+carb\w*[:\s]*([\d.]+)\s*g/i,          'carbs'],
+    [/protein[:\s]*([\d.]+)\s*g/i,                  'protein'],
+    [/potassium[:\s]*(\d+)\s*m?g/i,                 'potassium'],
+  ];
+
+  for (const [re, field] of patterns) {
+    if (result[field] !== undefined) continue;
+    for (const target of targets) {
+      const m = target.match(re);
+      if (m) { result[field] = num(m[1]) as never; break; }
     }
   }
+
   return result;
 }
 
